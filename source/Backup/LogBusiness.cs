@@ -53,6 +53,9 @@ namespace Backup
                 case LogLevel.Error:
                     log += string.Format("[ERROR] {0}", message);
                     break;
+                case LogLevel.None:
+                    log = message;
+                    break;
                 default:
                     log += message;
                     break;

@@ -11,28 +11,19 @@ namespace Backup
 {
     internal static class BackupBusiness
     {
-        private static int copiedFilesCount;
+        private static BackupProcess backupProcess;
 
-        private static string backupBasePath;
-
-        private static string[] sources;
-
-        private static int sourceFilesCount;
-
-        private static int deletedFilesCount;
-
-        public static void StartPipeline(string[] sourcesParam, string destinationParam)
+        public static void StartPipeline(BackupProcess backupProcessParam)
         {
-            var startedTime = DateTime.Now;
+            backupProcess = backupProcessParam;
+            backupProcess.StartedTime = DateTime.Now;
+            backupProcess.BackupBaseFolder = ConfigurationManager.AppSettings["BackupBaseFolder"];
+            backupProcess.BackupBasePath = Path.Combine(backupProcess.Destination, backupProcess.BackupBaseFolder);
 
-            Console.Title = "Backup";
-            LogBusiness.Log("====================================================================================", LogType.File, LogLevel.Info);
-            LogBusiness.Log("====================================== BACKUP ======================================", LogType.File, LogLevel.Info);
-            LogBusiness.Log("====================================================================================", LogType.File, LogLevel.Info);
-
-            sources = sourcesParam;
-            var backupBaseFolder = ConfigurationManager.AppSettings["BackupBaseFolder"];
-            backupBasePath = Path.Combine(destinationParam, backupBaseFolder);
+            Console.Title = "Backup Process";
+            LogBusiness.Log("====================================================================================", LogType.File, LogLevel.None);
+            LogBusiness.Log("====================================== BACKUP ======================================", LogType.File, LogLevel.None);
+            LogBusiness.Log("====================================================================================", LogType.File, LogLevel.None);
 
             var bufferSize = Convert.ToInt32(ConfigurationManager.AppSettings["BufferSize"]);
             var sourceFilesBuffer = new BlockingCollection<FileInfo>(bufferSize);
@@ -56,15 +47,15 @@ namespace Backup
             }
             finally
             {
-                LogBusiness.Log("====================================================================================", LogType.File, LogLevel.Info);
-                LogBusiness.Log(string.Format("= Total of source files: {0}", sourceFilesCount), LogType.File, LogLevel.Info);
-                LogBusiness.Log(string.Format("= Total of copied files: {0}", copiedFilesCount), LogType.File, LogLevel.Info);
-                LogBusiness.Log(string.Format("= Total of deleted files on destination: {0}", deletedFilesCount), LogType.File, LogLevel.Info);
-                LogBusiness.Log(string.Format("= Start time: {0}", startedTime), LogType.File, LogLevel.Info);
-                LogBusiness.Log(string.Format("= End time: {0}", DateTime.Now), LogType.File, LogLevel.Info);
-                LogBusiness.Log(string.Format("= Time spent: {0}", DateTime.Now.Subtract(startedTime)), LogType.File, LogLevel.Info);
-                LogBusiness.Log("====================================================================================", LogType.File, LogLevel.Info);
-                LogBusiness.DumpToFile(destinationParam);
+                LogBusiness.Log("====================================================================================", LogType.File, LogLevel.None);
+                LogBusiness.Log(string.Format("{0,-81} ==", string.Format("== Total of source files: {0}", backupProcess.SourceFiles.Count)), LogType.File, LogLevel.None);
+                LogBusiness.Log(string.Format("{0,-81} ==", string.Format("== Total of copied files: {0}", backupProcess.CopiedFiles.Count)), LogType.File, LogLevel.None);
+                LogBusiness.Log(string.Format("{0,-81} ==", string.Format("== Total of deleted files on destination: {0}", backupProcess.DeletedFiles.Count)), LogType.File, LogLevel.None);
+                LogBusiness.Log(string.Format("{0,-81} ==", string.Format("== Start time: {0}", backupProcess.StartedTime)), LogType.File, LogLevel.None);
+                LogBusiness.Log(string.Format("{0,-81} ==", string.Format("== End time: {0}", DateTime.Now)), LogType.File, LogLevel.None);
+                LogBusiness.Log(string.Format("{0,-81} ==", string.Format("== Time spent: {0}", DateTime.Now.Subtract(backupProcess.StartedTime).ToString("g"))), LogType.File, LogLevel.None);
+                LogBusiness.Log("====================================================================================", LogType.File, LogLevel.None);
+                LogBusiness.DumpToFile(backupProcess.Destination);
             }
         }
 
@@ -73,16 +64,14 @@ namespace Backup
             try
             {
                 var token = cts.Token;
-                var ret = new List<FileInfo>();
+                backupProcess.SourceFiles = new List<FileInfo>();
 
-                foreach (var source in sources.TakeWhile(source => !token.IsCancellationRequested))
+                foreach (var source in backupProcess.Sources.TakeWhile(source => !token.IsCancellationRequested))
                 {
-                    ret.AddRange(FileBusiness.TraverseTree(source));
+                    backupProcess.SourceFiles.AddRange(FileBusiness.TraverseTree(source));
                 }
 
-                sourceFilesCount = ret.Count;
-
-                ret.ForEach(x => sourceFilesBuffer.Add(x, token));
+                backupProcess.SourceFiles.ForEach(x => sourceFilesBuffer.Add(x, token));
             }
             catch (Exception e)
             {
@@ -104,16 +93,16 @@ namespace Backup
             try
             {
                 var token = cts.Token;
-                var fileToCopyList = new List<FileInfo>();
-                var destinationFilesList = new List<FileInfo>();
-                var destinationFilesToDeleteList = new List<FileInfo>();
+                backupProcess.CopiedFiles = new List<FileInfo>();
+                backupProcess.DestinationFiles = new List<FileInfo>();
+                backupProcess.DeletedFiles = new List<FileInfo>();
 
                 // To copy a folder's contents to a new location:
                 // Create a new target folder, if necessary.
-                if (!Directory.Exists(backupBasePath))
+                if (!Directory.Exists(backupProcess.BackupBasePath))
                 {
-                    Directory.CreateDirectory(backupBasePath);
-                    LogBusiness.Log(string.Format("Creating backup destination folder {0}", backupBasePath), LogType.File, LogLevel.Info);
+                    Directory.CreateDirectory(backupProcess.BackupBasePath);
+                    LogBusiness.Log(string.Format("Creating backup destination folder {0}", backupProcess.BackupBasePath), LogType.File, LogLevel.Info);
                 }
 
                 foreach (var fileToCopy in sourceFilesBuffer.GetConsumingEnumerable())
@@ -123,11 +112,11 @@ namespace Backup
                         break;
                     }
 
-                    fileToCopyList.Add(fileToCopy);
+                    backupProcess.CopiedFiles.Add(fileToCopy);
 
                     // Changes the source root by the destination root plus the base folder.
                     // TODO: Search for a better way to do this.
-                    var targetPath = Path.Combine(backupBasePath, fileToCopy.Directory.FullName.Replace(fileToCopy.Directory.Root.Name, string.Empty));
+                    var targetPath = Path.Combine(backupProcess.BackupBasePath, fileToCopy.Directory.FullName.Replace(fileToCopy.Directory.Root.Name, string.Empty));
 
                     // Use Path class to manipulate file and directory paths.
                     var destFile = Path.Combine(targetPath, fileToCopy.Name);
@@ -155,7 +144,6 @@ namespace Backup
                             finally
                             {
                                 LogBusiness.Log(string.Format("Rewriting existing file {0} to {1}...", fileToCopy.FullName, destFile), LogType.Console, LogLevel.Info);
-                                copiedFilesCount++;
                             }
                         }
                     }
@@ -173,39 +161,37 @@ namespace Backup
                         File.Copy(fileToCopy.FullName, destFile);
 
                         LogBusiness.Log(string.Format("Copying new file {0} to {1}...", fileToCopy.FullName, destFile), LogType.Console, LogLevel.Info);
-                        copiedFilesCount++;
                     }
                 }
 
                 // Gathering all files from backup
-                FileBusiness.TraverseTree(backupBasePath).ForEach(x => destinationFilesList.Add(x));
+                FileBusiness.TraverseTree(backupProcess.BackupBasePath).ForEach(x => backupProcess.DestinationFiles.Add(x));
 
                 // Comparing backup file against source files to find deleted files
                 // TODO: I think is possible improve it.
-                foreach (var destFI in destinationFilesList)
+                foreach (var destFI in backupProcess.DestinationFiles)
                 {
-                    var destFile = destFI.FullName.Replace(backupBasePath + "\\", string.Empty);
-                    var flag = true;
+                    var destFile = destFI.FullName.Replace(backupProcess.BackupBasePath + "\\", string.Empty);
+                    var canDeleteFile = true;
 
-                    foreach (var sourceFI in fileToCopyList)
+                    foreach (var sourceFI in backupProcess.CopiedFiles)
                     {
                         if (sourceFI.FullName.Replace(sourceFI.Directory.Root.Name, string.Empty) == destFile)
                         {
-                            flag = false;
+                            canDeleteFile = false;
                         }
                     }
 
-                    if (flag)
+                    if (canDeleteFile)
                     {
-                        destinationFilesToDeleteList.Add(destFI);
+                        backupProcess.DeletedFiles.Add(destFI);
                     }
                 }
 
                 // Excludes the files
-                foreach (var fileToDelete in destinationFilesToDeleteList)
+                foreach (var fileToDelete in backupProcess.DeletedFiles)
                 {
                     FileBusiness.DeleteFile(fileToDelete.FullName);
-                    deletedFilesCount++;
                     LogBusiness.Log(string.Format("Deleting nonexistent file {0}...", fileToDelete.FullName), LogType.Console, LogLevel.Info);
                 }
             }

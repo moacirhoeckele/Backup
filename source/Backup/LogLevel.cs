@@ -20,6 +20,11 @@
         /// <summary>
         /// A warning message.
         /// </summary>
-        Warning
+        Warning,
+
+        /// <summary>
+        /// Just a message
+        /// </summary>
+        None
     }
 }
