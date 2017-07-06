@@ -125,9 +125,18 @@ namespace Backup
             {
                 File.Delete(fullName);
             }
-            catch (UnauthorizedAccessException uae)
+            catch (UnauthorizedAccessException)
             {
-                //TODO: do something here
+                try
+                {
+                    // Set new file attributes and try to copy again.
+                    File.SetAttributes(fullName, FileAttributes.Normal);
+                    File.Delete(fullName);
+                }
+                catch (Exception e)
+                {
+                    LogBusiness.Log(string.Format("Error on deleting file {0}: {1}", fullName, e.Message), LogType.File, LogLevel.Error);
+                }
             }
         }
     }
